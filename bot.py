@@ -1,98 +1,121 @@
 import os
 import discord
-from discord import app_commands
-from discord.ext import commands
 import requests
 import threading
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# Load tokens
+# Load tokens from environment variables
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-# Bot setup
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+print("🤖 Starting Discord Bot...")
+print(f"DISCORD_TOKEN present: {bool(DISCORD_TOKEN)}")
+print(f"OPENROUTER_API_KEY present: {bool(OPENROUTER_API_KEY)}")
 
-# Model to use
+# Discord setup with intents
+intents = discord.Intents.default()
+intents.messages = True
+intents.message_content = True
+client = discord.Client(intents=intents)
+
+# Model to use from OpenRouter
 MODEL = "openai/gpt-3.5-turbo"
 
-@bot.event
+# Track bot status
+bot_ready = False
+
+@client.event
 async def on_ready():
-    print(f"✅ Bot is online as {bot.user}")
-    try:
-        synced = await bot.tree.sync()
-        print(f"✅ Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"❌ Error syncing commands: {e}")
+    global bot_ready
+    bot_ready = True
+    print(f"✅ Bot is online as {client.user}")
 
-@bot.tree.command(name="ai", description="Ask the AI anything!")
-@app_commands.describe(prompt="Your question or prompt for the AI")
-async def ai_command(interaction: discord.Interaction, prompt: str):
-    """Slash command to interact with AI"""
-    if not OPENROUTER_API_KEY:
-        await interaction.response.send_message("❌ AI service is not configured.")
+@client.event
+async def on_message(message):
+    if message.author == client.user:
         return
-    
-    await interaction.response.defer(thinking=True)
-    
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": 1000,
-                "temperature": 0.7
-            },
-            timeout=30
-        )
-        
-        data = response.json()
-        
-        if "choices" in data and len(data["choices"]) > 0:
-            answer = data["choices"][0]["message"]["content"]
-            await interaction.followup.send(answer[:2000])
-        else:
-            await interaction.followup.send("❌ No response from AI.")
-            
-    except Exception as e:
-        await interaction.followup.send(f"⚠️ Error: {str(e)[:100]}")
 
-@bot.tree.command(name="ping", description="Check if bot is alive")
-async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message(f"🏓 Pong!")
+    if message.content.startswith("!ask"):
+        channel_id = message.channel.id
+        prompt = message.content[len("!ask "):].strip()
+        if not prompt:
+            await message.channel.send("Please provide a question. Example: `!ask What is AI?`")
+            return
+
+        await message.channel.send("Thinking... 🤖")
+
+        try:
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1000
+                },
+                timeout=30
+            )
+
+            data = response.json()
+
+            if "choices" in data and len(data["choices"]) > 0:
+                answer = data["choices"][0]["message"]["content"]
+                await message.channel.send(answer[:2000])
+            else:
+                await message.channel.send("❌ No response from AI.")
+
+        except Exception as e:
+            await message.channel.send(f"⚠️ Error: {str(e)[:100]}")
 
 # HTTP server for Render health checks
-PORT = int(os.getenv("PORT", 8000))
+PORT = int(os.getenv("PORT", 10000))  # Render provides PORT
 
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b"Bot is running")
+        
+        if bot_ready:
+            self.wfile.write(b"✅ Bot is running and ready")
+        else:
+            self.wfile.write(b"🔄 Bot is starting up...")
     
     def log_message(self, format, *args):
-        pass  # Disable logging
+        # Suppress log messages to reduce noise
+        pass
 
 def run_server():
+    print(f"🌐 Starting HTTP server on port {PORT}")
     server = HTTPServer(('', PORT), SimpleHandler)
-    print(f"🌐 HTTP server running on port {PORT}")
     server.serve_forever()
 
 # Start HTTP server in background thread
-if 'RENDER' in os.environ or 'PORT' in os.environ:
-    threading.Thread(target=run_server, daemon=True).start()
+server_thread = threading.Thread(target=run_server, daemon=True)
+server_thread.start()
+print(f"✅ HTTP server started on port {PORT}")
+print(f"✅ Uptime Robot can ping: http://0.0.0.0:{PORT}")
+
+# Give HTTP server a moment to start
+time.sleep(2)
 
 # Start Discord bot
-if __name__ == "__main__":
+print("🚀 Starting Discord bot connection...")
+try:
     if not DISCORD_TOKEN:
         print("❌ ERROR: DISCORD_TOKEN not found!")
-        exit(1)
+        print("Add DISCORD_TOKEN in Render environment variables")
+        # Keep HTTP server running even if Discord fails
+        while True:
+            time.sleep(10)
     
-    bot.run(DISCORD_TOKEN)
+    client.run(DISCORD_TOKEN)
+except Exception as e:
+    print(f"❌ Discord bot error: {e}")
+    # Keep the process alive for Uptime Robot
+    while True:
+        time.sleep(10)
