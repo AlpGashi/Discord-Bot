@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands
 import requests
 import threading
-import time
+
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Local tokens/keys (keep them safe in environment variables in production!)
