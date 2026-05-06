@@ -3,7 +3,8 @@ import discord
 import requests
 from dotenv import load_dotenv
 import time
-import asyncio
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # Load ENV
 load_dotenv()
@@ -15,6 +16,24 @@ if not DISCORD_TOKEN:
 
 print("🤖 Starting bot...")
 MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+
+# HTTP Server for Render (stops port scanning)
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write("✅ Discord bot alive!".encode('utf-8'))
+
+def run_http_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    print(f"🌐 HTTP server on port {port}")
+    server.serve_forever()
+
+# Start HTTP server in background
+threading.Thread(target=run_http_server, daemon=True).start()
+time.sleep(2)  # Let server bind
 
 # Discord setup
 intents = discord.Intents.default()
@@ -36,11 +55,9 @@ async def on_message(message):
             await message.channel.send("Usage: !ask <question>")
             return
 
-        # Send thinking message
         thinking_msg = await message.channel.send("Thinking... 🤖")
 
         try:
-            # API call
             response = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
@@ -59,20 +76,15 @@ async def on_message(message):
                 raise ValueError(f"API error: {data.get('error', 'No choices')}")
             
             answer = data["choices"][0]["message"]["content"].strip()
-            
-            # Edit thinking message to final answer only
             await thinking_msg.edit(content=answer[:2000])
             
         except Exception as e:
-            error_msg = f"Error: {str(e)[:100]}"
-            await thinking_msg.edit(content=error_msg)
+            await thinking_msg.edit(content=f"Error: {str(e)[:100]}")
 
-# Run forever
+# Run bot
 try:
     client.run(DISCORD_TOKEN)
 except Exception as e:
     print(f"❌ Error: {e}")
     while True:
         time.sleep(10)
-
-#testing
