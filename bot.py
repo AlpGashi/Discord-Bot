@@ -17,7 +17,7 @@ if not DISCORD_TOKEN:
 print("🤖 Starting bot...")
 MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
-# HTTP Server for Render (stops port scanning)
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -31,11 +31,11 @@ def run_http_server():
     print(f"🌐 HTTP server on port {port}")
     server.serve_forever()
 
-# Start HTTP server in background
-threading.Thread(target=run_http_server, daemon=True).start()
-time.sleep(2)  # Let server bind
 
-# Discord setup
+threading.Thread(target=run_http_server, daemon=True).start()
+time.sleep(2) 
+
+
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
@@ -81,7 +81,7 @@ async def on_message(message):
         except Exception as e:
             await thinking_msg.edit(content=f"Error: {str(e)[:100]}")
 
-# Run bot
+
 try:
     client.run(DISCORD_TOKEN)
 except Exception as e:
